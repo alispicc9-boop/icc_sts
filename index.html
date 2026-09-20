@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>مركز المعلومات والاتصالات — لوحة الإحصائيات</title>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
@@ -768,12 +768,16 @@ body.world-active #scanlines{
 .keypad-btn.verify{ color:#00ff66; border-color:rgba(0,255,102,0.6); background:rgba(0,255,102,0.08); font-size:1.05rem; }
 .keypad-btn.verify:hover{ background:rgba(0,255,102,0.22); color:#fff; box-shadow:0 0 22px rgba(0,255,102,0.6); }
 .keypad-btn.verify:disabled{ opacity:0.35; cursor:not-allowed; transform:none; box-shadow:none; }
+.keypad-btn:disabled{ opacity:0.35; cursor:not-allowed; }
+
 .admin-message{
   text-align:center; font-size:.85rem; font-weight:700;
   min-height:22px; margin-bottom:6px; color:#8fa5bf;
 }
 .admin-message.error{ color:var(--neon-red); text-shadow:0 0 12px var(--neon-red); }
 .admin-message.success{ color:var(--neon-green); text-shadow:0 0 12px var(--neon-green); }
+.admin-message.locked{ color:var(--neon-yellow); text-shadow:0 0 12px var(--neon-yellow); }
+
 .edit-header{
   display:flex; align-items:center; gap:14px; padding-bottom:16px;
   border-bottom:1px solid rgba(0,243,255,0.28); margin-bottom:20px;
@@ -991,7 +995,7 @@ body.world-active #scanlines{
 
 <script>
 /* =========================================================
-   🎵 محرك الأصوات — Soft Electronic Beeps (نظيف وسريع وغير مزعج)
+   🎵 محرك الأصوات — Soft Electronic Beeps
    ========================================================= */
 let audioCtx=null, audioEnabled=true, masterGain=null, dryGain=null, reverbNode=null, reverbGain=null;
 
@@ -1001,10 +1005,10 @@ function initAudio(){
     const AC=window.AudioContext||window.webkitAudioContext;
     if (!AC) return;
     audioCtx=new AC();
-    masterGain=audioCtx.createGain(); masterGain.gain.value=0.45;  // ← مستوى إجمالي هادئ
+    masterGain=audioCtx.createGain(); masterGain.gain.value=0.45;
     dryGain=audioCtx.createGain(); dryGain.gain.value=0.90;
     reverbNode=audioCtx.createConvolver(); reverbNode.buffer=createReverbIR(2.0,3.2);
-    reverbGain=audioCtx.createGain(); reverbGain.gain.value=0.22;  // ← reverb أهدأ
+    reverbGain=audioCtx.createGain(); reverbGain.gain.value=0.22;
     dryGain.connect(masterGain); reverbNode.connect(reverbGain); reverbGain.connect(masterGain);
     masterGain.connect(audioCtx.destination);
   } catch(_) { audioCtx=null; }
@@ -1025,157 +1029,85 @@ function primeAudioOnUserGesture(){
   document.addEventListener('pointerdown',h,{once:true}); document.addEventListener('keydown',h,{once:true});
 }
 
-/* ===== دالة مساعدة: نغمة إلكترونية ناعمة ===== */
 function softTone(opts){
   if (!audioCtx) return;
-  const {
-    freq = 1000,
-    freqEnd = null,
-    type = 'sine',
-    duration = 0.08,
-    volume = 0.03,
-    delay = 0,
-    attack = 0.003,
-    release = 0.05,
-    filterFreq = null
-  } = opts;
+  const { freq=1000, freqEnd=null, type='sine', duration=0.08, volume=0.03, delay=0, attack=0.003, release=0.05, filterFreq=null } = opts;
   const t0 = audioCtx.currentTime + delay;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, t0);
-  if (freqEnd !== null){
-    osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 20), t0 + duration);
-  }
+  if (freqEnd !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 20), t0 + duration);
   gain.gain.setValueAtTime(0.0001, t0);
   gain.gain.exponentialRampToValueAtTime(volume, t0 + attack);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration + release);
-
   let lastNode = osc;
   if (filterFreq !== null){
     const f = audioCtx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = filterFreq;
-    f.Q.value = 1;
-    osc.connect(f);
-    lastNode = f;
+    f.type = 'lowpass'; f.frequency.value = filterFreq; f.Q.value = 1;
+    osc.connect(f); lastNode = f;
   }
-  lastNode.connect(gain);
-  connectToMix(gain);
-  osc.start(t0);
-  osc.stop(t0 + duration + release + 0.05);
+  lastNode.connect(gain); connectToMix(gain);
+  osc.start(t0); osc.stop(t0 + duration + release + 0.05);
 }
 
-/* =========================================================
-   🔊 الأصوات — كلها ناعمة، إلكترونية، سريعة
-   ========================================================= */
-
-/* 🔹 نقرة زر: beep نظيف قصير جداً */
 function sfxButtonClick(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-  // نغمة سريعة نظيفة
   softTone({ freq: 1480, freqEnd: 1120, type:'sine', duration:0.045, volume:0.035, release:0.02 });
-  // طبقة ثانية رقيقة
   softTone({ freq: 2360, freqEnd: 1900, type:'sine', duration:0.035, volume:0.018, delay:0.006, release:0.02 });
 }
-
-/* 🔹 الضغط على مكعب: ثلاث نوتات صاعدة سريعة */
 function sfxCubeClick(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-  // نوتة 1 — منخفضة قليلاً
   softTone({ freq: 620, type:'sine', duration:0.06, volume:0.04, release:0.04 });
-  // نوتة 2 — أعلى
   softTone({ freq: 930, type:'sine', duration:0.06, volume:0.035, delay:0.05, release:0.04 });
-  // نوتة 3 — أعلى قمة، تنتهي بنعومة
   softTone({ freq: 1240, freqEnd: 1480, type:'sine', duration:0.09, volume:0.03, delay:0.10, release:0.06 });
-  // sparkle عالٍ
   softTone({ freq: 2480, type:'triangle', duration:0.05, volume:0.012, delay:0.11, release:0.04 });
 }
-
-/* 🔹 الدخول السينمائي: arpeggio صاعد سريع + shimmer خفيف */
 function sfxCinematicEnter(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-
-  // arpeggio صاعد 5 نوتات — سريع
-  const notes = [523, 659, 784, 988, 1319];  // C5 E5 G5 B5 E6
+  const notes = [523, 659, 784, 988, 1319];
   notes.forEach((f, i) => {
-    softTone({
-      freq: f,
-      type: 'sine',
-      duration: 0.13,
-      volume: 0.032,
-      delay: i * 0.055,
-      release: 0.08
-    });
-    // طبقة triangle رقيقة فوقها
-    softTone({
-      freq: f * 2,
-      type: 'triangle',
-      duration: 0.08,
-      volume: 0.010,
-      delay: i * 0.055 + 0.008,
-      release: 0.06
-    });
+    softTone({ freq: f, type: 'sine', duration: 0.13, volume: 0.032, delay: i * 0.055, release: 0.08 });
+    softTone({ freq: f * 2, type: 'triangle', duration: 0.08, volume: 0.010, delay: i * 0.055 + 0.008, release: 0.06 });
   });
-
-  // shimmer خفيف في النهاية
   softTone({ freq: 2637, type:'sine', duration:0.25, volume:0.014, delay:0.30, release:0.20 });
   softTone({ freq: 3520, type:'sine', duration:0.22, volume:0.008, delay:0.36, release:0.18 });
 }
-
-/* 🔹 الخروج السينمائي: arpeggio هابط ناعم */
 function sfxCinematicExit(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-
-  const notes = [1319, 988, 784, 659, 523];  // E6 B5 G5 E5 C5
+  const notes = [1319, 988, 784, 659, 523];
   notes.forEach((f, i) => {
-    softTone({
-      freq: f,
-      type: 'sine',
-      duration: 0.14,
-      volume: 0.030,
-      delay: i * 0.06,
-      release: 0.09
-    });
+    softTone({ freq: f, type: 'sine', duration: 0.14, volume: 0.030, delay: i * 0.06, release: 0.09 });
   });
-
-  // نوتة ختامية ناعمة
   softTone({ freq: 392, type:'sine', duration:0.35, volume:0.026, delay:0.30, release:0.28 });
 }
-
-/* 🔹 رقم لوحة المفاتيح: beep رقمي قصير جداً */
 function sfxKeypadDigit(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-  // beep مزدوج سريع (نغمة واحدة فقط نظيفة)
   softTone({ freq: 1760, type:'sine', duration:0.032, volume:0.032, release:0.018 });
   softTone({ freq: 2640, type:'sine', duration:0.028, volume:0.014, delay:0.008, release:0.016 });
 }
-
-/* 🔹 حذف: beep هابط قصير */
 function sfxKeypadDelete(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
   softTone({ freq: 880, freqEnd: 660, type:'sine', duration:0.06, volume:0.028, release:0.04 });
 }
-
-/* 🔹 نجاح: chord صاعد ناعم ثلاثي */
 function sfxVerifySuccess(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-  // Do-Mi-So (C E G) صاعد
   softTone({ freq: 523,  type:'sine', duration:0.14, volume:0.030, release:0.12 });
   softTone({ freq: 784,  type:'sine', duration:0.14, volume:0.028, delay:0.07, release:0.12 });
   softTone({ freq: 1319, type:'sine', duration:0.20, volume:0.026, delay:0.14, release:0.16 });
-  // shimmer عالٍ
   softTone({ freq: 2093, type:'triangle', duration:0.10, volume:0.010, delay:0.18, release:0.10 });
 }
-
-/* 🔹 خطأ: نغمتان هابطتان ناعمتان */
 function sfxVerifyError(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
   softTone({ freq: 620, type:'sine', duration:0.11, volume:0.030, release:0.09 });
   softTone({ freq: 415, type:'sine', duration:0.16, volume:0.026, delay:0.10, release:0.14 });
 }
-
-/* 🔹 toast: إشعار رقمي خفيف */
+/* صوت القفل الجديد */
+function sfxLockout(){
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  softTone({ freq: 440, freqEnd: 220, type:'sine', duration:0.25, volume:0.030, release:0.20 });
+  softTone({ freq: 330, freqEnd: 165, type:'sine', duration:0.25, volume:0.022, delay:0.05, release:0.20 });
+}
 function sfxToast(type){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
   if (type==='error'){
@@ -1186,33 +1118,60 @@ function sfxToast(type){
     softTone({ freq: 1320, type:'sine', duration:0.10, volume:0.022, delay:0.06, release:0.07 });
   }
 }
-
-/* 🔹 Intro Boom: صعود لطيف + نغمة ختامية ناعمة */
 function sfxIntroBoom(){
   if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
-
-  // نغمة صاعدة ناعمة طويلة
-  softTone({
-    freq: 220,
-    freqEnd: 440,
-    type: 'sine',
-    duration: 1.0,
-    volume: 0.030,
-    release: 0.5
-  });
-  // طبقة ثانية فوقها
-  softTone({
-    freq: 330,
-    freqEnd: 660,
-    type: 'triangle',
-    duration: 0.9,
-    volume: 0.014,
-    delay: 0.15,
-    release: 0.45
-  });
-  // نغمة ختامية عند الوصول
+  softTone({ freq: 220, freqEnd: 440, type: 'sine', duration: 1.0, volume: 0.030, release: 0.5 });
+  softTone({ freq: 330, freqEnd: 660, type: 'triangle', duration: 0.9, volume: 0.014, delay: 0.15, release: 0.45 });
   softTone({ freq: 880, type:'sine', duration:0.5, volume:0.028, delay:1.0, release:0.4 });
   softTone({ freq: 1320, type:'sine', duration:0.4, volume:0.018, delay:1.1, release:0.35 });
+}
+
+/* =========================================================
+   🔐 أكواد المرور الجديدة — صعبة التخمين
+   ========================================================= */
+const ACCESS_CODES = {
+  '83472': 0,   // شعبة الأنظمة والبرامجيات
+  '29615': 1,   // شعبة نظم المعلومات الجغرافية (GIS)
+  '75184': 2,   // الحكمة الإلكترونية
+  '40938': 3,   // شعبة الصيانة
+  '62571': 4,   // شعبة قيادة الحاسوب
+  '18346': 5,   // شعبة الأمن السيبراني
+  '97025': 6,   // شعبة ريادة
+  '54709': 7,   // وحدة صحة تصدير الوثائق الإلكترونية
+  '31286': 8    // وحدة الإعلام
+};
+
+/* =========================================================
+   🛡️ نظام الحماية من المحاولات المتكررة
+   ========================================================= */
+const SECURITY = {
+  maxAttempts: 3,
+  lockDurationMs: 30000,           // 30 ثانية قفل
+  failedAttempts: 0,
+  lockedUntil: 0
+};
+
+function isLockedOut(){
+  return Date.now() < SECURITY.lockedUntil;
+}
+function getRemainingLockSeconds(){
+  return Math.max(0, Math.ceil((SECURITY.lockedUntil - Date.now()) / 1000));
+}
+function registerFailedAttempt(){
+  SECURITY.failedAttempts++;
+  if (SECURITY.failedAttempts >= SECURITY.maxAttempts){
+    SECURITY.lockedUntil = Date.now() + SECURITY.lockDurationMs;
+    SECURITY.failedAttempts = 0;
+    return true;  // تم القفل
+  }
+  return false;
+}
+function registerSuccessfulAttempt(){
+  SECURITY.failedAttempts = 0;
+  SECURITY.lockedUntil = 0;
+}
+function getRemainingAttempts(){
+  return Math.max(0, SECURITY.maxAttempts - SECURITY.failedAttempts);
 }
 
 /* ============ البيانات ============ */
@@ -1368,8 +1327,6 @@ const DETAILS = [
         {n:'تصاميم إعلامية', d:96, p:14},
         {n:'حملات توعوية', d:42, p:6}]}]}
 ];
-
-const ACCESS_CODES = {'10001':0,'10002':1,'10003':2,'10004':3,'10005':4,'10006':5,'10007':6,'10008':7,'10009':8};
 
 function loadSavedData(){
   try {
@@ -2236,19 +2193,64 @@ function setupCodeUI(){
   const keypad=document.getElementById('codeKeypad');
   const verifyBtn=document.getElementById('adminVerify');
   const messageEl=document.getElementById('adminMessage');
+
+  let lockTimerInterval = null;
+
+  function setKeypadDisabled(disabled){
+    keypad.querySelectorAll('.keypad-btn').forEach(b => b.disabled = disabled);
+    if (disabled) verifyBtn.disabled = true;
+  }
+
+  function updateLockMessage(){
+    if (isLockedOut()){
+      const s = getRemainingLockSeconds();
+      messageEl.textContent = `🔒 مقفل — الرجاء الانتظار ${s} ثانية`;
+      messageEl.classList.add('locked');
+      messageEl.classList.remove('error','success');
+      setKeypadDisabled(true);
+    } else {
+      if (lockTimerInterval){
+        clearInterval(lockTimerInterval);
+        lockTimerInterval = null;
+      }
+      setKeypadDisabled(false);
+      refreshUI();
+    }
+  }
+
+  function startLockTimer(){
+    if (lockTimerInterval) clearInterval(lockTimerInterval);
+    updateLockMessage();
+    lockTimerInterval = setInterval(() => {
+      if (isLockedOut()) updateLockMessage();
+      else {
+        clearInterval(lockTimerInterval);
+        lockTimerInterval = null;
+        updateLockMessage();
+      }
+    }, 1000);
+  }
+
   function refreshUI(){
+    if (isLockedOut()){ updateLockMessage(); return false; }
     inputs.forEach((inp,i)=>{
       inp.classList.toggle('filled', inp.value.length===1);
       inp.classList.toggle('active', i===codeCursor && inp.value.length===0);
     });
     const full=inputs.every(inp=>inp.value.length===1);
     verifyBtn.disabled=!full;
-    messageEl.textContent = full ? 'اضغط تحقق للمتابعة' :
-      `أدخل الأرقام الخمسة (${inputs.filter(i=>i.value).length}/5)`;
-    messageEl.classList.remove('error','success');
+    const remaining = getRemainingAttempts();
+    if (full){
+      messageEl.textContent = `اضغط تحقق للمتابعة • محاولات متبقية: ${remaining}`;
+    } else {
+      messageEl.textContent = `أدخل الأرقام الخمسة (${inputs.filter(i=>i.value).length}/5) • محاولات: ${remaining}`;
+    }
+    messageEl.classList.remove('error','success','locked');
     return full;
   }
+
   function pushDigit(n){
+    if (isLockedOut()) return;
     const firstEmpty=inputs.findIndex(inp=>inp.value.length===0);
     if (firstEmpty===-1) return;
     inputs[firstEmpty].value=n;
@@ -2259,6 +2261,7 @@ function setupCodeUI(){
     if (full) setTimeout(()=>tryVerify(), 200);
   }
   function backspace(){
+    if (isLockedOut()) return;
     let lf=-1;
     for (let i=inputs.length-1;i>=0;i--){ if (inputs[i].value.length===1){ lf=i; break; } }
     if (lf>=0){ inputs[lf].value=''; codeCursor=lf; sfxKeypadDelete(); }
@@ -2267,21 +2270,24 @@ function setupCodeUI(){
     refreshUI();
   }
   function clearAll(){
+    if (isLockedOut()) return;
     inputs.forEach(i=>{ i.value=''; i.classList.remove('filled','error'); });
     codeCursor=0;
     sfxKeypadDelete();
     refreshUI();
   }
   keypad.addEventListener('click', e=>{
-    const btn=e.target.closest('.keypad-btn'); if (!btn) return;
+    const btn=e.target.closest('.keypad-btn'); if (!btn || btn.disabled) return;
     if (btn.dataset.num!==undefined) pushDigit(btn.dataset.num);
     else if (btn.dataset.action==='back') backspace();
     else if (btn.dataset.action==='clear') clearAll();
   });
+
   document.addEventListener('keydown', handleKeydown);
   function handleKeydown(e){
     if (!adminOverlay.classList.contains('active')) return;
     if (adminTargetIndex!==null) return;
+    if (isLockedOut()) return;
     if (/^[0-9]$/.test(e.key)){ pushDigit(e.key); e.preventDefault(); }
     else if (e.key==='Backspace'){ backspace(); e.preventDefault(); }
     else if (e.key==='Delete'){ clearAll(); }
@@ -2289,28 +2295,53 @@ function setupCodeUI(){
   }
   window.__adminKeydownHandler && document.removeEventListener('keydown', window.__adminKeydownHandler);
   window.__adminKeydownHandler=handleKeydown;
+
   verifyBtn.addEventListener('click', tryVerify);
+
   function tryVerify(){
+    if (isLockedOut()){ updateLockMessage(); return; }
     const code=inputs.map(i=>i.value).join('');
     if (code.length!==5) return;
+
     if (ACCESS_CODES.hasOwnProperty(code)){
+      registerSuccessfulAttempt();
       sfxVerifySuccess();
       const idx=ACCESS_CODES[code];
       messageEl.textContent='✓ تم التحقق — جارٍ فتح البيانات...';
       messageEl.classList.add('success');
+      messageEl.classList.remove('error','locked');
       setTimeout(()=>showEditForm(idx), 450);
     } else {
+      const locked = registerFailedAttempt();
       sfxVerifyError();
-      messageEl.textContent='✗ الرمز غير صحيح، حاول مرة أخرى';
-      messageEl.classList.add('error');
-      inputs.forEach(inp=>inp.classList.add('error'));
-      setTimeout(()=>{
-        inputs.forEach(inp=>{ inp.value=''; inp.classList.remove('error','filled','active'); });
-        codeCursor=0; refreshUI();
-      }, 550);
+      if (locked){
+        sfxLockout();
+        messageEl.textContent = `🔒 تجاوزت الحد المسموح — مقفل لمدة ${Math.ceil(SECURITY.lockDurationMs/1000)} ثانية`;
+        messageEl.classList.add('locked');
+        messageEl.classList.remove('error','success');
+        startLockTimer();
+        inputs.forEach(inp=>{
+          inp.value='';
+          inp.classList.remove('error','filled','active');
+        });
+        codeCursor=0;
+      } else {
+        const remaining = getRemainingAttempts();
+        messageEl.textContent = `✗ الرمز غير صحيح — محاولات متبقية: ${remaining}`;
+        messageEl.classList.add('error');
+        messageEl.classList.remove('success','locked');
+        inputs.forEach(inp=>inp.classList.add('error'));
+        setTimeout(()=>{
+          inputs.forEach(inp=>{ inp.value=''; inp.classList.remove('error','filled','active'); });
+          codeCursor=0; refreshUI();
+        }, 700);
+      }
     }
   }
-  refreshUI();
+
+  // عند الفتح، تحقق إن كان مقفلاً
+  if (isLockedOut()) startLockTimer();
+  else refreshUI();
   inputs[0].classList.add('active');
 }
 
@@ -2505,7 +2536,7 @@ async function boot(){
   loadSavedData();
   try {
     if (document.fonts && document.fonts.ready){
-      await Promise.race([document.fonts.ready, new Promise(r=>setTimeout(r, 800))]);
+      await Promise.race([document.fonts.ready, new Promise(r=>setTimeout(r,800))]);
     }
   } catch(_) {}
   init3DWorld();
