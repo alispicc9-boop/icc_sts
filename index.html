@@ -991,7 +991,7 @@ body.world-active #scanlines{
 
 <script>
 /* =========================================================
-   🔥 محرك الأصوات Glitch Sci-Fi (Web Audio API)
+   🎵 محرك الأصوات — Soft Electronic Beeps (نظيف وسريع وغير مزعج)
    ========================================================= */
 let audioCtx=null, audioEnabled=true, masterGain=null, dryGain=null, reverbNode=null, reverbGain=null;
 
@@ -1001,10 +1001,10 @@ function initAudio(){
     const AC=window.AudioContext||window.webkitAudioContext;
     if (!AC) return;
     audioCtx=new AC();
-    masterGain=audioCtx.createGain(); masterGain.gain.value=0.75;
-    dryGain=audioCtx.createGain(); dryGain.gain.value=0.82;
-    reverbNode=audioCtx.createConvolver(); reverbNode.buffer=createReverbIR(3.4,2.6);
-    reverbGain=audioCtx.createGain(); reverbGain.gain.value=0.42;
+    masterGain=audioCtx.createGain(); masterGain.gain.value=0.45;  // ← مستوى إجمالي هادئ
+    dryGain=audioCtx.createGain(); dryGain.gain.value=0.90;
+    reverbNode=audioCtx.createConvolver(); reverbNode.buffer=createReverbIR(2.0,3.2);
+    reverbGain=audioCtx.createGain(); reverbGain.gain.value=0.22;  // ← reverb أهدأ
     dryGain.connect(masterGain); reverbNode.connect(reverbGain); reverbGain.connect(masterGain);
     masterGain.connect(audioCtx.destination);
   } catch(_) { audioCtx=null; }
@@ -1025,540 +1025,194 @@ function primeAudioOnUserGesture(){
   document.addEventListener('pointerdown',h,{once:true}); document.addEventListener('keydown',h,{once:true});
 }
 
-/* ===== مولّد ضجيج عادي ===== */
-function makeNoiseBuffer(duration,curve){
-  const size=Math.max(1,Math.floor(audioCtx.sampleRate*duration));
-  const buf=audioCtx.createBuffer(1,size,audioCtx.sampleRate);
-  const data=buf.getChannelData(0);
-  for (let i=0;i<size;i++){
-    const t=i/size;
-    const env=curve==='swell'?Math.sin(t*Math.PI):curve==='decay'?Math.pow(1-t,2):curve==='rise'?t:1;
-    data[i]=(Math.random()*2-1)*env;
+/* ===== دالة مساعدة: نغمة إلكترونية ناعمة ===== */
+function softTone(opts){
+  if (!audioCtx) return;
+  const {
+    freq = 1000,
+    freqEnd = null,
+    type = 'sine',
+    duration = 0.08,
+    volume = 0.03,
+    delay = 0,
+    attack = 0.003,
+    release = 0.05,
+    filterFreq = null
+  } = opts;
+  const t0 = audioCtx.currentTime + delay;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (freqEnd !== null){
+    osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 20), t0 + duration);
   }
-  return buf;
-}
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(volume, t0 + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration + release);
 
-/* ===== مولّد Glitch: bit-crushed + sample-hold ===== */
-function makeGlitchBuffer(duration, intensity){
-  const rate = audioCtx.sampleRate;
-  const size = Math.max(1, Math.floor(rate * duration));
-  const buf = audioCtx.createBuffer(1, size, rate);
-  const data = buf.getChannelData(0);
-  // عدد البتات: كلما زادت الشدة، كلما قلّت البتات
-  const bitDepth = Math.max(2, Math.round(8 - intensity * 6));
-  const steps = Math.pow(2, bitDepth);
-  // طول الإمساك: كلما زادت الشدة، قلّت المدة (تقطيع أعلى)
-  const holdLen = Math.max(1, Math.round(rate / (150 + intensity * 3500)));
-  let held = 0;
-  for (let i = 0; i < size; i++){
-    if (i % holdLen === 0){
-      let v = (Math.random() * 2 - 1);
-      // bit crush
-      v = Math.round(v * steps) / steps;
-      // قطع عشوائي (glitch dropout)
-      if (Math.random() < intensity * 0.10) v = 0;
-      held = v;
-    }
-    const t = i / size;
-    const env = Math.pow(1 - t, 1.6);
-    data[i] = held * env;
+  let lastNode = osc;
+  if (filterFreq !== null){
+    const f = audioCtx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = filterFreq;
+    f.Q.value = 1;
+    osc.connect(f);
+    lastNode = f;
   }
-  return buf;
+  lastNode.connect(gain);
+  connectToMix(gain);
+  osc.start(t0);
+  osc.stop(t0 + duration + release + 0.05);
 }
 
 /* =========================================================
-   🔊 الأصوات الجديدة — Glitch Sci-Fi
+   🔊 الأصوات — كلها ناعمة، إلكترونية، سريعة
    ========================================================= */
 
-/* 🔹 نقرة زر: beep رقمي حاد + glitch صغير */
+/* 🔹 نقرة زر: beep نظيف قصير جداً */
 function sfxButtonClick(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-
-  // blip arpeggio رقمي
-  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-  o.type='square';
-  o.frequency.setValueAtTime(2000, t0);
-  o.frequency.setValueAtTime(2600, t0 + 0.012);
-  o.frequency.setValueAtTime(1700, t0 + 0.024);
-  o.frequency.setValueAtTime(900, t0 + 0.045);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.002);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
-  const bpf = audioCtx.createBiquadFilter();
-  bpf.type='bandpass'; bpf.frequency.value=2200; bpf.Q.value=2;
-  o.connect(bpf); bpf.connect(g); connectToMix(g);
-  o.start(t0); o.stop(t0 + 0.07);
-
-  // sub thump سريع
-  const sub=audioCtx.createOscillator(), sg=audioCtx.createGain();
-  sub.type='sine';
-  sub.frequency.setValueAtTime(140, t0);
-  sub.frequency.exponentialRampToValueAtTime(50, t0 + 0.05);
-  sg.gain.setValueAtTime(0.0001, t0);
-  sg.gain.exponentialRampToValueAtTime(0.06, t0 + 0.003);
-  sg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
-  sub.connect(sg); connectToMix(sg);
-  sub.start(t0); sub.stop(t0 + 0.07);
-
-  // glitch فائق السرعة
-  const n = audioCtx.createBufferSource();
-  n.buffer = makeGlitchBuffer(0.05, 0.9);
-  const ng = audioCtx.createGain(); ng.gain.value = 0.04;
-  n.connect(ng); connectToMix(ng);
-  n.start(t0); n.stop(t0 + 0.05);
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  // نغمة سريعة نظيفة
+  softTone({ freq: 1480, freqEnd: 1120, type:'sine', duration:0.045, volume:0.035, release:0.02 });
+  // طبقة ثانية رقيقة
+  softTone({ freq: 2360, freqEnd: 1900, type:'sine', duration:0.035, volume:0.018, delay:0.006, release:0.02 });
 }
 
-/* 🔹 الضغط على مكعب: data stream + bit stutter + thump */
+/* 🔹 الضغط على مكعب: ثلاث نوتات صاعدة سريعة */
 function sfxCubeClick(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-
-  // 1) sub thump عميق
-  const sub=audioCtx.createOscillator(), subG=audioCtx.createGain();
-  sub.type='sine';
-  sub.frequency.setValueAtTime(110, t0);
-  sub.frequency.exponentialRampToValueAtTime(35, t0 + 0.5);
-  subG.gain.setValueAtTime(0.0001, t0);
-  subG.gain.exponentialRampToValueAtTime(0.32, t0 + 0.008);
-  subG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
-  sub.connect(subG); connectToMix(subG);
-  sub.start(t0); sub.stop(t0 + 0.65);
-
-  // 2) glitch data stream
-  const gs = audioCtx.createBufferSource();
-  gs.buffer = makeGlitchBuffer(0.42, 0.75);
-  const gf = audioCtx.createBiquadFilter();
-  gf.type='bandpass';
-  gf.frequency.setValueAtTime(3200, t0);
-  gf.frequency.exponentialRampToValueAtTime(500, t0 + 0.42);
-  gf.Q.value = 1.5;
-  const gg = audioCtx.createGain(); gg.gain.value = 0.14;
-  gs.connect(gf); gf.connect(gg); connectToMix(gg);
-  gs.start(t0); gs.stop(t0 + 0.42);
-
-  // 3) digital chirp (سلّم ترددات مربوج)
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type='square';
-  o.frequency.setValueAtTime(180, t0);
-  o.frequency.setValueAtTime(520, t0 + 0.05);
-  o.frequency.setValueAtTime(1100, t0 + 0.10);
-  o.frequency.setValueAtTime(340, t0 + 0.20);
-  o.frequency.setValueAtTime(2200, t0 + 0.28);
-  o.frequency.exponentialRampToValueAtTime(280, t0 + 0.40);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.04, t0 + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
-  const oF = audioCtx.createBiquadFilter();
-  oF.type='bandpass'; oF.frequency.value = 1400; oF.Q.value = 3;
-  o.connect(oF); oF.connect(g); connectToMix(g);
-  o.start(t0); o.stop(t0 + 0.45);
-
-  // 4) metal rings (hologram)
-  [1200, 1850, 2600].forEach((f, i)=>{
-    const oc = audioCtx.createOscillator(), gc = audioCtx.createGain();
-    oc.type='triangle';
-    oc.frequency.setValueAtTime(f, t0);
-    oc.frequency.exponentialRampToValueAtTime(f * 0.68, t0 + 0.32);
-    oc.detune.value = (Math.random() - 0.5) * 40;
-    gc.gain.setValueAtTime(0.0001, t0);
-    gc.gain.exponentialRampToValueAtTime(0.03 / (i + 1), t0 + 0.005);
-    gc.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.38);
-    oc.connect(gc); connectToMix(gc);
-    oc.start(t0); oc.stop(t0 + 0.42);
-  });
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  // نوتة 1 — منخفضة قليلاً
+  softTone({ freq: 620, type:'sine', duration:0.06, volume:0.04, release:0.04 });
+  // نوتة 2 — أعلى
+  softTone({ freq: 930, type:'sine', duration:0.06, volume:0.035, delay:0.05, release:0.04 });
+  // نوتة 3 — أعلى قمة، تنتهي بنعومة
+  softTone({ freq: 1240, freqEnd: 1480, type:'sine', duration:0.09, volume:0.03, delay:0.10, release:0.06 });
+  // sparkle عالٍ
+  softTone({ freq: 2480, type:'triangle', duration:0.05, volume:0.012, delay:0.11, release:0.04 });
 }
 
-/* 🔹 الدخول السينمائي: teleport warp + glitch burst + arpeggio صاعد */
+/* 🔹 الدخول السينمائي: arpeggio صاعد سريع + shimmer خفيف */
 function sfxCinematicEnter(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0 = audioCtx.currentTime;
-  const dur = 2.2;
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
 
-  // 1) 6 glitch bursts في البداية (digital interference)
-  for (let i = 0; i < 6; i++){
-    const n = audioCtx.createBufferSource();
-    n.buffer = makeGlitchBuffer(0.07, 0.85);
-    const nf = audioCtx.createBiquadFilter();
-    nf.type = 'highpass';
-    nf.frequency.value = 700 + i * 250;
-    const ng = audioCtx.createGain(); ng.gain.value = 0.06;
-    n.connect(nf); nf.connect(ng); connectToMix(ng);
-    n.start(t0 + i * 0.06); n.stop(t0 + i * 0.06 + 0.07);
-  }
-
-  // 2) arpeggio رقمي صاعد
-  const notes = [180, 260, 380, 560, 780, 1100, 1500, 2200];
-  notes.forEach((freq, i)=>{
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), f = audioCtx.createBiquadFilter();
-    o.type = 'square';
-    o.frequency.setValueAtTime(freq, t0 + i * 0.13);
-    o.frequency.exponentialRampToValueAtTime(freq * 1.35, t0 + i * 0.13 + 0.11);
-    f.type = 'bandpass'; f.frequency.value = freq * 1.5; f.Q.value = 3.5;
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.13);
-    g.gain.exponentialRampToValueAtTime(0.04, t0 + i * 0.13 + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.13 + 0.13);
-    o.connect(f); f.connect(g); connectToMix(g);
-    o.start(t0 + i * 0.13); o.stop(t0 + i * 0.13 + 0.15);
+  // arpeggio صاعد 5 نوتات — سريع
+  const notes = [523, 659, 784, 988, 1319];  // C5 E5 G5 B5 E6
+  notes.forEach((f, i) => {
+    softTone({
+      freq: f,
+      type: 'sine',
+      duration: 0.13,
+      volume: 0.032,
+      delay: i * 0.055,
+      release: 0.08
+    });
+    // طبقة triangle رقيقة فوقها
+    softTone({
+      freq: f * 2,
+      type: 'triangle',
+      duration: 0.08,
+      volume: 0.010,
+      delay: i * 0.055 + 0.008,
+      release: 0.06
+    });
   });
 
-  // 3) sub warp rising
-  const sub = audioCtx.createOscillator(), sg = audioCtx.createGain();
-  sub.type = 'sine';
-  sub.frequency.setValueAtTime(38, t0);
-  sub.frequency.exponentialRampToValueAtTime(85, t0 + dur * 0.85);
-  sg.gain.setValueAtTime(0.0001, t0);
-  sg.gain.exponentialRampToValueAtTime(0.15, t0 + 0.35);
-  sg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  sub.connect(sg); connectToMix(sg);
-  sub.start(t0); sub.stop(t0 + dur + 0.05);
-
-  // 4) whoosh ضجيجي (filter sweep)
-  const n2 = audioCtx.createBufferSource(); n2.buffer = makeNoiseBuffer(dur, 'swell');
-  const nf2 = audioCtx.createBiquadFilter();
-  nf2.type = 'bandpass';
-  nf2.frequency.setValueAtTime(250, t0);
-  nf2.frequency.exponentialRampToValueAtTime(6500, t0 + dur * 0.85);
-  nf2.Q.value = 2;
-  const ng2 = audioCtx.createGain(); ng2.gain.value = 0.10;
-  n2.connect(nf2); nf2.connect(ng2); connectToMix(ng2);
-  n2.start(t0); n2.stop(t0 + dur);
-
-  // 5) descending glitch tap نحو النهاية
-  for (let i = 0; i < 12; i++){
-    const t = t0 + dur * 0.55 + i * 0.05;
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = 'square';
-    o.frequency.setValueAtTime(2400 - i * 180, t);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.025, t + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    o.connect(g); connectToMix(g);
-    o.start(t); o.stop(t + 0.06);
-  }
-
-  // 6) Impact نهائي ضخم (teleport boom)
-  const iT = t0 + dur * 0.92;
-  const imp = audioCtx.createOscillator(), ig = audioCtx.createGain();
-  imp.type = 'sine';
-  imp.frequency.setValueAtTime(180, iT);
-  imp.frequency.exponentialRampToValueAtTime(28, iT + 0.8);
-  ig.gain.setValueAtTime(0.0001, iT);
-  ig.gain.exponentialRampToValueAtTime(0.48, iT + 0.012);
-  ig.gain.exponentialRampToValueAtTime(0.0001, iT + 0.85);
-  imp.connect(ig); connectToMix(ig);
-  imp.start(iT); imp.stop(iT + 0.9);
-
-  // 7) data burst ضخم عند الاصطدام
-  const db = audioCtx.createBufferSource();
-  db.buffer = makeGlitchBuffer(0.5, 0.9);
-  const dbf = audioCtx.createBiquadFilter();
-  dbf.type = 'lowpass';
-  dbf.frequency.setValueAtTime(5000, iT);
-  dbf.frequency.exponentialRampToValueAtTime(200, iT + 0.5);
-  const dbg = audioCtx.createGain(); dbg.gain.value = 0.15;
-  db.connect(dbf); dbf.connect(dbg); connectToMix(dbg);
-  db.start(iT); db.stop(iT + 0.5);
+  // shimmer خفيف في النهاية
+  softTone({ freq: 2637, type:'sine', duration:0.25, volume:0.014, delay:0.30, release:0.20 });
+  softTone({ freq: 3520, type:'sine', duration:0.22, volume:0.008, delay:0.36, release:0.18 });
 }
 
-/* 🔹 الخروج السينمائي: reverse glitch + power down */
+/* 🔹 الخروج السينمائي: arpeggio هابط ناعم */
 function sfxCinematicExit(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0 = audioCtx.currentTime;
-  const dur = 1.2;
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
 
-  // 1) descending glitch taps
-  for (let i = 0; i < 10; i++){
-    const t = t0 + i * 0.04;
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = 'square';
-    o.frequency.setValueAtTime(2400 - i * 220, t);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.025, t + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
-    o.connect(g); connectToMix(g);
-    o.start(t); o.stop(t + 0.05);
-  }
+  const notes = [1319, 988, 784, 659, 523];  // E6 B5 G5 E5 C5
+  notes.forEach((f, i) => {
+    softTone({
+      freq: f,
+      type: 'sine',
+      duration: 0.14,
+      volume: 0.030,
+      delay: i * 0.06,
+      release: 0.09
+    });
+  });
 
-  // 2) reverse sweep
-  const o=audioCtx.createOscillator(), g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  o.type='sawtooth';
-  o.frequency.setValueAtTime(1200, t0);
-  o.frequency.exponentialRampToValueAtTime(60, t0 + dur);
-  f.type='lowpass';
-  f.frequency.setValueAtTime(5000, t0);
-  f.frequency.exponentialRampToValueAtTime(150, t0 + dur);
-  f.Q.value=4;
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.09, t0 + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  o.connect(f); f.connect(g); connectToMix(g);
-  o.start(t0); o.stop(t0 + dur + 0.05);
-
-  // 3) power-down boom
-  const bT = t0 + dur * 0.7;
-  const b = audioCtx.createOscillator(), bg = audioCtx.createGain();
-  b.type = 'sine';
-  b.frequency.setValueAtTime(130, bT);
-  b.frequency.exponentialRampToValueAtTime(28, bT + 0.7);
-  bg.gain.setValueAtTime(0.0001, bT);
-  bg.gain.exponentialRampToValueAtTime(0.34, bT + 0.012);
-  bg.gain.exponentialRampToValueAtTime(0.0001, bT + 0.85);
-  b.connect(bg); connectToMix(bg);
-  b.start(bT); b.stop(bT + 0.9);
-
-  // 4) glitch noise fade
-  const n = audioCtx.createBufferSource();
-  n.buffer = makeGlitchBuffer(0.7, 0.7);
-  const nf = audioCtx.createBiquadFilter();
-  nf.type='bandpass';
-  nf.frequency.setValueAtTime(4000, t0);
-  nf.frequency.exponentialRampToValueAtTime(300, t0 + 0.7);
-  nf.Q.value = 2;
-  const ng = audioCtx.createGain(); ng.gain.value = 0.08;
-  n.connect(nf); nf.connect(ng); connectToMix(ng);
-  n.start(t0); n.stop(t0 + 0.7);
+  // نوتة ختامية ناعمة
+  softTone({ freq: 392, type:'sine', duration:0.35, volume:0.026, delay:0.30, release:0.28 });
 }
 
-/* 🔹 رقم لوحة المفاتيح: beep رقمي نظيف */
+/* 🔹 رقم لوحة المفاتيح: beep رقمي قصير جداً */
 function sfxKeypadDigit(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-
-  // arpeggio سريع جداً (3 نوتات)
-  [1800, 2400, 1400].forEach((f, i)=>{
-    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-    o.type='square';
-    o.frequency.setValueAtTime(f, t0 + i * 0.018);
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.018);
-    g.gain.exponentialRampToValueAtTime(0.028, t0 + i * 0.018 + 0.002);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.018 + 0.03);
-    const bpf = audioCtx.createBiquadFilter();
-    bpf.type='bandpass'; bpf.frequency.value=2000; bpf.Q.value=3;
-    o.connect(bpf); bpf.connect(g); connectToMix(g);
-    o.start(t0 + i * 0.018); o.stop(t0 + i * 0.018 + 0.04);
-  });
-
-  // sub tap
-  const s=audioCtx.createOscillator(), sg=audioCtx.createGain();
-  s.type='sine';
-  s.frequency.setValueAtTime(180, t0);
-  s.frequency.exponentialRampToValueAtTime(75, t0 + 0.04);
-  sg.gain.setValueAtTime(0.0001, t0);
-  sg.gain.exponentialRampToValueAtTime(0.06, t0 + 0.002);
-  sg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
-  s.connect(sg); connectToMix(sg);
-  s.start(t0); s.stop(t0 + 0.07);
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  // beep مزدوج سريع (نغمة واحدة فقط نظيفة)
+  softTone({ freq: 1760, type:'sine', duration:0.032, volume:0.032, release:0.018 });
+  softTone({ freq: 2640, type:'sine', duration:0.028, volume:0.014, delay:0.008, release:0.016 });
 }
 
-/* 🔹 حذف: glitch denial */
+/* 🔹 حذف: beep هابط قصير */
 function sfxKeypadDelete(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-
-  // stutter قاسي
-  for (let i = 0; i < 4; i++){
-    const t = t0 + i * 0.02;
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type='square';
-    o.frequency.setValueAtTime(700 - i * 100, t);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.045, t + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.022);
-    o.connect(g); connectToMix(g);
-    o.start(t); o.stop(t + 0.025);
-  }
-
-  // descending
-  const o2 = audioCtx.createOscillator(), g2 = audioCtx.createGain();
-  o2.type='sawtooth';
-  o2.frequency.setValueAtTime(520, t0);
-  o2.frequency.exponentialRampToValueAtTime(120, t0 + 0.15);
-  g2.gain.setValueAtTime(0.0001, t0);
-  g2.gain.exponentialRampToValueAtTime(0.04, t0 + 0.005);
-  g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
-  const lp = audioCtx.createBiquadFilter();
-  lp.type='lowpass'; lp.frequency.value=800;
-  o2.connect(lp); lp.connect(g2); connectToMix(g2);
-  o2.start(t0); o2.stop(t0 + 0.18);
-
-  // glitch tiny
-  const n = audioCtx.createBufferSource();
-  n.buffer = makeGlitchBuffer(0.1, 0.85);
-  const ng = audioCtx.createGain(); ng.gain.value = 0.05;
-  n.connect(ng); connectToMix(ng);
-  n.start(t0); n.stop(t0 + 0.1);
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  softTone({ freq: 880, freqEnd: 660, type:'sine', duration:0.06, volume:0.028, release:0.04 });
 }
 
-/* 🔹 نجاح: Access Granted — hologram chime + data flow */
+/* 🔹 نجاح: chord صاعد ناعم ثلاثي */
 function sfxVerifySuccess(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-
-  // chord harmonique futuriste
-  [330, 495, 660, 990, 1320, 1980].forEach((f, i)=>{
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = i < 3 ? 'triangle' : 'sine';
-    o.frequency.setValueAtTime(f, t0 + i * 0.025);
-    o.detune.value = (Math.random() - 0.5) * 15;
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.025);
-    g.gain.exponentialRampToValueAtTime(0.05 / (i * 0.5 + 1), t0 + i * 0.025 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.025 + 0.9);
-    o.connect(g); connectToMix(g);
-    o.start(t0 + i * 0.025); o.stop(t0 + i * 0.025 + 1.1);
-  });
-
-  // data stream rising (glitch)
-  const gs = audioCtx.createBufferSource();
-  gs.buffer = makeGlitchBuffer(0.8, 0.5);
-  const gf = audioCtx.createBiquadFilter();
-  gf.type='highpass';
-  gf.frequency.setValueAtTime(2000, t0);
-  gf.frequency.exponentialRampToValueAtTime(6000, t0 + 0.8);
-  const gg = audioCtx.createGain(); gg.gain.value = 0.05;
-  gs.connect(gf); gf.connect(gg); connectToMix(gg);
-  gs.start(t0); gs.stop(t0 + 0.8);
-
-  // sub nاعم
-  const sub = audioCtx.createOscillator(), sg = audioCtx.createGain();
-  sub.type='sine';
-  sub.frequency.setValueAtTime(110, t0);
-  sub.frequency.exponentialRampToValueAtTime(55, t0 + 0.6);
-  sg.gain.setValueAtTime(0.0001, t0);
-  sg.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
-  sg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.8);
-  sub.connect(sg); connectToMix(sg);
-  sub.start(t0); sub.stop(t0 + 0.85);
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  // Do-Mi-So (C E G) صاعد
+  softTone({ freq: 523,  type:'sine', duration:0.14, volume:0.030, release:0.12 });
+  softTone({ freq: 784,  type:'sine', duration:0.14, volume:0.028, delay:0.07, release:0.12 });
+  softTone({ freq: 1319, type:'sine', duration:0.20, volume:0.026, delay:0.14, release:0.16 });
+  // shimmer عالٍ
+  softTone({ freq: 2093, type:'triangle', duration:0.10, volume:0.010, delay:0.18, release:0.10 });
 }
 
-/* 🔹 خطأ: Access Denied — braam + glitch denial */
+/* 🔹 خطأ: نغمتان هابطتان ناعمتان */
 function sfxVerifyError(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-  const dur = 0.9;
-
-  // braam layers
-  [1, 1.013, 0.988].forEach((m, i)=>{
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), f = audioCtx.createBiquadFilter();
-    o.type='sawtooth';
-    o.frequency.setValueAtTime(90 * m, t0);
-    o.frequency.exponentialRampToValueAtTime(45 * m, t0 + dur);
-    f.type='lowpass';
-    f.frequency.setValueAtTime(800, t0);
-    f.frequency.exponentialRampToValueAtTime(180, t0 + dur);
-    f.Q.value = 6;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.11 / (i * 0.6 + 1), t0 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(f); f.connect(g); connectToMix(g);
-    o.start(t0); o.stop(t0 + dur + 0.05);
-  });
-
-  // stutter digital harsh
-  for (let i = 0; i < 8; i++){
-    const t = t0 + i * 0.05;
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type='square';
-    o.frequency.setValueAtTime(400 + Math.random() * 900, t);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.04, t + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
-    o.connect(g); connectToMix(g);
-    o.start(t); o.stop(t + 0.045);
-  }
-
-  // sub thud
-  const sub = audioCtx.createOscillator(), subG = audioCtx.createGain();
-  sub.type='sine';
-  sub.frequency.setValueAtTime(70, t0);
-  sub.frequency.exponentialRampToValueAtTime(28, t0 + 0.5);
-  subG.gain.setValueAtTime(0.0001, t0);
-  subG.gain.exponentialRampToValueAtTime(0.28, t0 + 0.012);
-  subG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.65);
-  sub.connect(subG); connectToMix(subG);
-  sub.start(t0); sub.stop(t0 + 0.7);
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
+  softTone({ freq: 620, type:'sine', duration:0.11, volume:0.030, release:0.09 });
+  softTone({ freq: 415, type:'sine', duration:0.16, volume:0.026, delay:0.10, release:0.14 });
 }
 
-/* 🔹 toast: إشعار رقمي */
+/* 🔹 toast: إشعار رقمي خفيف */
 function sfxToast(type){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
   if (type==='error'){
-    [700, 480, 320].forEach((f, i)=>{
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type='square';
-      o.frequency.setValueAtTime(f, t0 + i * 0.05);
-      g.gain.setValueAtTime(0.0001, t0 + i * 0.05);
-      g.gain.exponentialRampToValueAtTime(0.038, t0 + i * 0.05 + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.05 + 0.18);
-      o.connect(g); connectToMix(g);
-      o.start(t0 + i * 0.05); o.stop(t0 + i * 0.05 + 0.2);
-    });
+    softTone({ freq: 720, type:'sine', duration:0.06, volume:0.026, release:0.05 });
+    softTone({ freq: 540, type:'sine', duration:0.09, volume:0.022, delay:0.06, release:0.07 });
   } else {
-    [1040, 1560, 2080].forEach((f, i)=>{
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type='triangle';
-      o.frequency.setValueAtTime(f, t0 + i * 0.04);
-      g.gain.setValueAtTime(0.0001, t0 + i * 0.04);
-      g.gain.exponentialRampToValueAtTime(0.035, t0 + i * 0.04 + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.04 + 0.32);
-      o.connect(g); connectToMix(g);
-      o.start(t0 + i * 0.04); o.stop(t0 + i * 0.04 + 0.35);
-    });
+    softTone({ freq: 880, type:'sine', duration:0.06, volume:0.024, release:0.05 });
+    softTone({ freq: 1320, type:'sine', duration:0.10, volume:0.022, delay:0.06, release:0.07 });
   }
 }
 
-/* 🔹 Intro Boom: warp-in سينمائي */
+/* 🔹 Intro Boom: صعود لطيف + نغمة ختامية ناعمة */
 function sfxIntroBoom(){
-  if(!audioEnabled)return; ensureAudioResumed(); if(!audioCtx)return;
-  const t0=audioCtx.currentTime;
-  const dur = 1.8;
+  if(!audioEnabled) return; ensureAudioResumed(); if(!audioCtx) return;
 
-  // sub warp
-  const sub = audioCtx.createOscillator(), subG = audioCtx.createGain();
-  sub.type='sine';
-  sub.frequency.setValueAtTime(95, t0);
-  sub.frequency.exponentialRampToValueAtTime(28, t0 + dur * 0.7);
-  subG.gain.setValueAtTime(0.0001, t0);
-  subG.gain.exponentialRampToValueAtTime(0.44, t0 + 0.02);
-  subG.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  sub.connect(subG); connectToMix(subG);
-  sub.start(t0); sub.stop(t0 + dur + 0.05);
-
-  // power-up sweep
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain(), f = audioCtx.createBiquadFilter();
-  o.type = 'sawtooth';
-  o.frequency.setValueAtTime(55, t0);
-  o.frequency.exponentialRampToValueAtTime(1800, t0 + dur * 0.6);
-  f.type = 'lowpass';
-  f.frequency.setValueAtTime(200, t0);
-  f.frequency.exponentialRampToValueAtTime(4200, t0 + dur * 0.8);
-  f.Q.value = 5;
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.06);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  o.connect(f); f.connect(g); connectToMix(g);
-  o.start(t0); o.stop(t0 + dur + 0.05);
-
-  // noise sweep
-  const n = audioCtx.createBufferSource(); n.buffer = makeNoiseBuffer(dur, 'decay');
-  const nf = audioCtx.createBiquadFilter();
-  nf.type='lowpass';
-  nf.frequency.setValueAtTime(7500, t0);
-  nf.frequency.exponentialRampToValueAtTime(180, t0 + dur);
-  nf.Q.value = 1.2;
-  const ng = audioCtx.createGain(); ng.gain.value = 0.16;
-  n.connect(nf); nf.connect(ng); connectToMix(ng);
-  n.start(t0); n.stop(t0 + dur);
-
-  // glitch burst medium
-  const gb = audioCtx.createBufferSource();
-  gb.buffer = makeGlitchBuffer(0.35, 0.8);
-  const gbf = audioCtx.createBiquadFilter();
-  gbf.type='highpass'; gbf.frequency.value = 1200;
-  const gbg = audioCtx.createGain(); gbg.gain.value = 0.06;
-  gb.connect(gbf); gbf.connect(gbg); connectToMix(gbg);
-  gb.start(t0 + dur * 0.5); gb.stop(t0 + dur * 0.85);
+  // نغمة صاعدة ناعمة طويلة
+  softTone({
+    freq: 220,
+    freqEnd: 440,
+    type: 'sine',
+    duration: 1.0,
+    volume: 0.030,
+    release: 0.5
+  });
+  // طبقة ثانية فوقها
+  softTone({
+    freq: 330,
+    freqEnd: 660,
+    type: 'triangle',
+    duration: 0.9,
+    volume: 0.014,
+    delay: 0.15,
+    release: 0.45
+  });
+  // نغمة ختامية عند الوصول
+  softTone({ freq: 880, type:'sine', duration:0.5, volume:0.028, delay:1.0, release:0.4 });
+  softTone({ freq: 1320, type:'sine', duration:0.4, volume:0.018, delay:1.1, release:0.35 });
 }
 
 /* ============ البيانات ============ */
@@ -1792,11 +1446,8 @@ const statswStatusTitle = document.getElementById('statswStatusTitle');
 
 let statswActive = false;
 let statswCurrentIndex = null;
-
-let statswTargetTiltX = 0;
-let statswTargetTiltY = 0;
-let statswCurrentTiltX = 0;
-let statswCurrentTiltY = 0;
+let statswTargetTiltX = 0, statswTargetTiltY = 0;
+let statswCurrentTiltX = 0, statswCurrentTiltY = 0;
 
 function hexToRgb(hex){
   const v=hex.replace('#','');
